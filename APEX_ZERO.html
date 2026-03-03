@@ -91,6 +91,23 @@ canvas{display:block}
 <div id="re"><h2 id="reh"></h2><p id="rep"></p></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+  // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAXX4zz2AyxNEAdFYJgttB6XiT6fSLQGso",
+  authDomain: "atomic-rivals.firebaseapp.com",
+  projectId: "atomic-rivals",
+  storageBucket: "atomic-rivals.firebasestorage.app",
+  messagingSenderId: "1071497296989",
+  appId: "1:1071497296989:web:cde046da9ee1ac194361b4"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 const WP=[
   {name:"ARC-15",slot:1,dmg:22,rof:700,mag:30,res:90,rl:2.2,sp:0.015,auto:true,rng:200},
   {name:"GHOST G17",slot:2,dmg:28,rof:400,mag:17,res:51,rl:1.4,sp:0.03,auto:false,rng:80},
