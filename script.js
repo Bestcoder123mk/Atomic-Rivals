@@ -1,4 +1,3 @@
-<script>
 const MAPS_DEF = [
   { name:'BREACH',  bounds:{x:30,z:20}, spawnR:{x:28,z:18}, fog:0.030, fogCol:0x080808 },
   { name:'OUTPOST', bounds:{x:38,z:26}, spawnR:{x:35,z:24}, fog:0.014, fogCol:0x100c06 },
@@ -17,9 +16,6 @@ let selectedMapId = 0, selectedDiffId = 1;
 function selMap(id){ selectedMapId=id; document.querySelectorAll('#map-grid .map-card').forEach((c,i)=>c.classList.toggle('active',i===id)); }
 function selDiff(id){ selectedDiffId=id; document.querySelectorAll('#diff-grid .diff-card2').forEach((c,i)=>c.classList.toggle('active',i===id)); }
 
-// ══════════════════════════════════════════════════════
-//  ATTACHMENT SYSTEM
-// ══════════════════════════════════════════════════════
 const ATTACHMENTS = {
   scope: [
     { id:'none',    name:'IRON SIGHTS', stat:'STANDARD ADS',   price:0,    adsMult:1.0,  zoomFov:56 },
@@ -2861,4 +2857,3 @@ document.getElementById("sb2").addEventListener("click",()=>{
 });
 
 window.addEventListener("resize",()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);});
-</script>
