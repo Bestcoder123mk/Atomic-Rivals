@@ -1646,9 +1646,7 @@ function lights(mapId){
     mapId===1?0.55:0.45
   );
   sc.add(hemi);
-
-  // Directional sun/moon
-  const sun=new THREE.DirectionalLight(mapId===1?0xffe090:mapId===2?0x8899cc:0xffd0b0, mapId===1?1.1:mapId===2?.5:.7);
+const sun=new THREE.DirectionalLight(mapId===1 ? 0xffe090 : mapId===2 ? 0x8899cc : 0xffd0b0, mapId===1 ? 1.1 : mapId===2 ? .5 : .7);
   sun.position.set(mapId===1?12:mapId===2?-8:8, 14, mapId===1?6:mapId===2?-10:6);
   sun.castShadow=true;
   sun.shadow.mapSize.width=2048; sun.shadow.mapSize.height=2048;
@@ -2158,13 +2156,13 @@ function bloodSplat(pos,isKill){
   const n=isKill?22:9;
   for(let i=0;i<n;i++){
     const r=0.018+Math.random()*.052;
-    const m=new THREE.Mesh(new THREE.SphereGeometry(r,4,3),
-      new THREE.MeshBasicMaterial({color:i%4===0?0x990000:i%4===1?0xcc0000:0xff1100:0x880000,transparent:true,opacity:1}));
+const m=new THREE.Mesh(new THREE.SphereGeometry(r,4,3),
+  new THREE.MeshBasicMaterial({color: i%4===0 ? 0x990000 : i%4===1 ? 0xcc0000 : i%4===2 ? 0xff1100 : 0x880000, transparent:true, opacity:1}));
     m.position.copy(pos).add(new THREE.Vector3((Math.random()-.5)*.15,(Math.random()-.5)*.15,(Math.random()-.5)*.15));
     const spd=2+Math.random()*5;
     const ang=Math.random()*Math.PI*2, tilt=Math.PI*.15+Math.random()*Math.PI*.55;
     const v=new THREE.Vector3(Math.cos(ang)*Math.sin(tilt),Math.cos(tilt),Math.sin(ang)*Math.sin(tilt)).multiplyScalar(spd);
-    sc.add(m); bloods.push({m,v,t:isKill?.9:.45,life:isKill?.9:.45});
+    sc.add(m); bloods.push({m,v,t:isKill ? .9 : .45, life:isKill ? .9 : .45});
   }
   if(isKill){
     const pr=.35+Math.random()*.28;
@@ -2295,10 +2293,6 @@ function showPenFlash(factor,walls,matLabel='WALL'){
   if(penFlashTimerLocal)clearTimeout(penFlashTimerLocal);
   penFlashTimerLocal=setTimeout(()=>{const w=WP[G.wi];pi.textContent='WALL PEN';pi.classList.toggle('show',S.penEnabled&&w.penMult>0);},900);
 }
-
-// ══════════════════════════════════════════════════════
-//  PLAYER MOVEMENT — with JUMP + WALL COLLISION
-// ══════════════════════════════════════════════════════
 function move(dt){
   if(G.dead||G.pause||G.shopOpen)return;
   cam.rotation.order="YXZ";
@@ -2356,22 +2350,20 @@ function move(dt){
     }
   }
 
-  // Map bounds
   const md=MAPS_DEF[selectedMapId];
   cam.position.x=Math.max(-md.bounds.x+.5,Math.min(md.bounds.x-.5,cam.position.x));
   cam.position.z=Math.max(-md.bounds.z+.5,Math.min(md.bounds.z-.5,cam.position.z));
 
-  // Jump indicator
   document.getElementById('jump-ind').classList.toggle('air', !G.onGround);
 
   const mv2=G.keys.KeyW||G.keys.KeyS||G.keys.KeyA||G.keys.KeyD;
   if(mv2)wBob+=dt*(sprint?15:9);
   if(wm){
-    const bx=Math.sin(wBob)*(mv2?.013:.003), by=Math.abs(Math.cos(wBob))*(mv2?.009:.002);
+    const bx=Math.sin(wBob)*(mv2 ? .013 : .003), by=Math.abs(Math.cos(wBob))*(mv2 ? .009 : .002);
     wKick*=(1-dt*14);
     const w=WP[G.wi];
     wm.position.y=(w.slot===1?-.21:-.19)+by-wKick*.06;
-    wm.position.x=(w.slot===1?.22:.18)+bx+G.leanCurrent*0.04;
+    wm.position.x=(w.slot===1 ? .22 : .18)+bx+G.leanCurrent*0.04;
     wm.rotation.x=-wKick*.28;
     wm.rotation.z=-G.leanCurrent*0.04;
   }
@@ -3173,5 +3165,4 @@ document.getElementById("sb2").addEventListener("click",()=>{
 window.addEventListener("resize",()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);});
 </script>
 </body>
-</html>
 </html>
