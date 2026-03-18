@@ -1,0 +1,9 @@
+{
+  "name": "APEX ZERO",
+  "short_name": "APEX ZERO",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#020a12",
+  "theme_color": "#00e5ff",
+  "orientation": "landscape"
+}
