@@ -5,6 +5,64 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>APEX ZERO — v14</title>
 <script>
+/* ===== EARLY SAFETY + DEFER STARTUP ===== */
+(function(){
+  window.addEventListener('error', function(e) {
+    try { console.error('[GLOBAL ERROR]', e.message, (e.filename||'') + ':' + (e.lineno||''), e.error || e); } catch(err) {}
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    try { console.error('[UNHANDLED REJECTION]', e.reason); } catch(err) {}
+  });
+  window.Game = window.Game || { cfg:{}, state:{} };
+  window.Game.cfg = window.Game.cfg || {};
+  window.Game.state = window.Game.state || {};
+  if (!Object.getOwnPropertyDescriptor(window, 'currentUser')) {
+    Object.defineProperty(window, 'currentUser', {
+      configurable: true,
+      enumerable: true,
+      get: function() { return window.Game && window.Game.state ? window.Game.state.currentUser || null : null; },
+      set: function(v) {
+        window.Game = window.Game || { state:{} };
+        window.Game.state = window.Game.state || {};
+        window.Game.state.currentUser = v;
+      }
+    });
+  }
+  window._threeLoaded = false;
+  window._threeLoadError = false;
+  window._threeLoadCallbacks = window._threeLoadCallbacks || [];
+  window._onThreeReady = function(cb) {
+    window._threeLoadCallbacks = window._threeLoadCallbacks || [];
+    if (window._threeLoaded && typeof THREE !== 'undefined') {
+      try { cb(); } catch(e) { console.error('[onThreeReady cb]', e); }
+      return;
+    }
+    window._threeLoadCallbacks.push(cb);
+  };
+  window.waitForThree = function() {
+    return new Promise(function(resolve) {
+      if (window._threeLoaded && typeof THREE !== 'undefined') return resolve();
+      window._threeLoadCallbacks = window._threeLoadCallbacks || [];
+      window._threeLoadCallbacks.push(resolve);
+    });
+  };
+  window.startSystemsSafe = async function(startFn) {
+    try {
+      if (document.readyState === 'loading') {
+        await new Promise(function(resolve) { document.addEventListener('DOMContentLoaded', resolve, { once:true }); });
+      }
+      await window.waitForThree();
+      if (typeof startFn === 'function') startFn();
+    } catch(e) {
+      console.error('[startSystemsSafe] failed', e);
+    }
+  };
+  window.weaponAttachmentGroup = window.weaponAttachmentGroup || null;
+  window.menuCanvas = window.menuCanvas || null;
+  window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || null;
+})();
+</script>
+<script>
 (async function _cacheStrategy() {
   var isDev = location.hostname === 'localhost'
            || location.hostname === '127.0.0.1'
@@ -70,7 +128,7 @@
   } catch(e) { console.warn('[boot] SW detection failed:', e); }
 })();
 </script>
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#020a12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -119,16 +177,16 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 <script>
-window._threeLoaded = false;
-window._threeLoadCallbacks = [];
-window._onThreeReady = function(cb) {
+window._threeLoaded = !!window._threeLoaded;
+window._threeLoadError = !!window._threeLoadError;
+window._threeLoadCallbacks = window._threeLoadCallbacks || [];
+window._onThreeReady = window._onThreeReady || function(cb) {
   if (window._threeLoaded && typeof THREE !== 'undefined') { try { cb(); } catch(e) { console.warn('_onThreeReady cb error:', e); } return; }
-  window._threeLoadCallbacks = window._threeLoadCallbacks || [];
   window._threeLoadCallbacks.push(cb);
 };
-window.waitForThree = function() {
+window.waitForThree = window.waitForThree || function() {
   return new Promise(function(resolve) {
-    if (window._threeLoaded) { resolve(); return; }
+    if (window._threeLoaded && typeof THREE !== 'undefined') { resolve(); return; }
     window._threeLoadCallbacks.push(resolve);
   });
 };
@@ -1697,7 +1755,7 @@ window.Boot = Boot;
           if (window.Boot && !window.Boot.started) {
             setTimeout(function() {
               try {
-                if (window.Boot && !window.Boot.started) window.Boot.start();
+                if (window.Boot && !window.Boot.started) window.startSystemsSafe(function() { window.Boot.start(); });
               } catch(e) { console.error('[three-loader] Boot.start() error:', e); }
             }, 0);
           }
@@ -5940,7 +5998,7 @@ function _renderLeaderboard(rows, tableEl, statusEl, mode) {
     })
   ].join('');
 }
-const FIREBASE_CONFIG = (function() {
+window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || (function() {
   if (window.FIREBASE_CONFIG_OVERRIDE) return window.FIREBASE_CONFIG_OVERRIDE;
   const meta = document.querySelector('meta[name="firebase-config"]');
   if (meta) { try { return JSON.parse(meta.content); } catch(e) {} }
@@ -5958,13 +6016,13 @@ let firebaseAuth = null, firebaseDb = null;
 function initFirebase() {
   try {
     if (typeof firebase !== 'undefined') {
-      firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+      firebaseApp = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(window.FIREBASE_CONFIG);
       firebaseAuth = firebase.auth();
       firebaseDb   = firebase.firestore();
       Game.state.firebaseAuth  = firebaseAuth;
       Game.state.firebaseDb    = firebaseDb;
       Game.state.firebaseReady = true;
-      firebaseReady        = true; 
+      window.firebaseReady = true; 
       firebaseAuth.onAuthStateChanged(user => {
         if (user) {
           currentUser = user;
@@ -5997,7 +6055,7 @@ async function signInWithGoogle() {
   const st = DOM['auth-status'];
   if (st) st.textContent = 'Opening Google sign-in...';
   try {
-    if (!firebaseReady) throw new Error('Firebase not initialized — use Guest mode');
+    if (!Game.state.firebaseReady) throw new Error('Firebase not initialized — use Guest mode');
     const provider = new firebase.auth.GoogleAuthProvider();
     await firebaseAuth.signInWithPopup(provider);
   } catch(e) {
@@ -6010,14 +6068,12 @@ async function signOut() {
   try {
     if (firebaseAuth) await firebaseAuth.signOut();
   } catch(e) {}
-  currentUser = null;
   Game.state.currentUser = null;
   DOM['auth-signin-view'].style.display = 'block';
   DOM['auth-signedin-view'].style.display = 'none';
   DOM['auth-status'].textContent = 'Signed out successfully';
 }
 function continueAsGuest() {
-  currentUser = null;
   Game.state.currentUser = null;
   var st = document.getElementById('auth-status');
   var btn = document.getElementById('guest-btn');
@@ -6055,7 +6111,7 @@ function enterGame() {
   var ldEl   = document.getElementById('ld');
   if (authEl) authEl.style.display = 'none';
   if (ldEl)   { ldEl.style.display = 'flex'; ldEl.style.opacity = '1'; }
-  if (!currentUser) {
+  if (!Game.state.currentUser) {
     GS.level = 0; GS.xp = 0; GS.flux = 0;
     GS.gamesPlayed = 0; GS.wins = 0; GS.rankIdx = 0; GS.mmr = 0;
   }
@@ -6089,7 +6145,7 @@ window.startGameSafe = async function() {
     console.error('[startGameSafe] THREE failed to load');
     return;
   }
-  if (window.Boot && !window.Boot.started) window.Boot.start();
+  if (window.Boot && !window.Boot.started) window.startSystemsSafe(function() { window.Boot.start(); });
   else if (typeof enterGame === 'function') enterGame();
 };
 async function loadPlayerData(uid) {
@@ -6127,7 +6183,7 @@ async function savePlayerData() {
 document.addEventListener('DOMContentLoaded', function _firebaseInit() {
   document.removeEventListener('DOMContentLoaded', _firebaseInit);
   initDOMCache(); 
-  initFirebase(); 
+  setTimeout(function() { try { if (typeof initFirebase === 'function') initFirebase(); } catch(e) { console.warn('initFirebase failed', e); } }, 0); 
   setTimeout(() => {
     if (!Game.state.firebaseReady) {
       const btn = DOM['google-signin-btn'];
