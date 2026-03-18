@@ -109,10 +109,10 @@ if (LOW_MODE) {
 }
 window.GAME_STARTED = false;
 window.addEventListener('error', function(e) {
-  console.error('[GLOBAL ERROR]', e.message, (e.filename||'') + ':' + (e.lineno||''), e.error);
+  try { console.error('[GLOBAL ERROR]', e.message, (e.filename||'') + ':' + (e.lineno||''), e.error || e); } catch(err) {}
 });
 window.addEventListener('unhandledrejection', function(e) {
-  console.error('[PROMISE ERROR]', e.reason);
+  try { console.error('[UNHANDLED PROMISE REJECTION]', e.reason); } catch(err) {}
 });
 document.addEventListener('keydown', function(e) {
   if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE && e.key === '`') { debugger; }
@@ -142,10 +142,24 @@ window.continueAsGuest = function() {
   if (st) st.textContent = 'LOADING 3D ENGINE...';
   if (btn) btn.disabled = true;
   window._onThreeReady(function() {
-    if (st) st.textContent = '';
-    if (btn) btn.disabled = false;
-    if (typeof enterGame === 'function') { enterGame(); }
-    else { window._pendingEnterGame = true; }
+    try {
+      if (st) st.textContent = '';
+      if (btn) btn.disabled = false;
+      if (typeof enterGame === 'function') {
+        enterGame();
+        window._pendingEnterGame = false;
+      } else {
+        window._pendingEnterGame = true;
+        setTimeout(function() {
+          if (typeof enterGame === 'function' && window._pendingEnterGame) {
+            window._pendingEnterGame = false;
+            enterGame();
+          }
+        }, 0);
+      }
+    } catch(e) {
+      console.error('[onThreeReady] enterGame error:', e);
+    }
   });
 };
 window.signInWithGoogle = async function() {
@@ -1602,38 +1616,47 @@ Boot.register('MenuBg',     async function() {
   }
 });
 setTimeout(function() {
-  if (Boot.ready) return;
+  if (window._threeLoaded && typeof THREE !== 'undefined') {
+    console.log('[Boot watchdog] THREE loaded — continuing boot.');
+    try {
+      Boot.ready = true;
+      window.GAME_STARTED = true;
+      var auth = document.getElementById('auth-scr');
+      var ld   = document.getElementById('ld');
+      var mm   = document.getElementById('mm');
+      if (auth) auth.style.display = 'none';
+      if (ld)   ld.style.display   = 'none';
+      if (mm)   mm.style.display   = 'flex';
+      if (typeof showPanel === 'function') showPanel('play');
+      if (typeof initMenuBg === 'function') initMenuBg();
+      if (typeof animateMenuBg === 'function' && typeof _menuRAF !== 'undefined' && _menuRAF === null)
+        _menuRAF = requestAnimationFrame(animateMenuBg);
+    } catch(e) { console.warn('[Boot watchdog] Recovery failed:', e); }
+    return;
+  }
+
   var threeOk   = typeof THREE !== 'undefined';
-  var bootStart = Boot.started;
-  var gameStart = !!window.GAME_STARTED;
-  console.error(
-    '[Boot watchdog] Startup stalled at 7s —',
-    'THREE=' + threeOk,
-    '| Boot.started=' + bootStart,
-    '| GAME_STARTED=' + gameStart,
-    '| _threeLoaded=' + window._threeLoaded,
-    '| _threeLoadError=' + window._threeLoadError
-  );
+  var bootStart = Boot && Boot.started;
+  console.error('[Boot watchdog] Startup stalled at 7s —', 'THREE=' + threeOk, '| Boot.started=' + bootStart,
+                '| _threeLoaded=' + window._threeLoaded, '| _threeLoadError=' + window._threeLoadError);
   if (Boot.systems) {
     Object.keys(Boot.systems).forEach(function(name) {
       var s = Boot.systems[name];
       if (!s.started) console.warn('[Boot watchdog]   ✗ System not started:', name, s.failed ? '(FAILED)' : '(PENDING)');
     });
   }
-  Boot.ready = true;
-  window.GAME_STARTED = true;
-  try {
-    var auth = document.getElementById('auth-scr');
-    var ld   = document.getElementById('ld');
-    var mm   = document.getElementById('mm');
-    if (auth) auth.style.display = 'none';
-    if (ld)   ld.style.display   = 'none';
-    if (mm)   mm.style.display   = 'flex';
-    if (typeof showPanel === 'function')    showPanel('play');
-    if (typeof initMenuBg === 'function')   initMenuBg();
-    if (typeof animateMenuBg === 'function' && typeof _menuRAF !== 'undefined' && _menuRAF === null)
-      _menuRAF = requestAnimationFrame(animateMenuBg);
-  } catch(e) { console.warn('[Boot watchdog] Recovery failed:', e); }
+
+  if (window._threeLoadError === true) {
+    try {
+      var st = document.getElementById('auth-status');
+      if (st) st.innerHTML = '⚠ 3D engine failed — <button id="three-retry">Retry</button>';
+      var btn = document.getElementById('three-retry');
+      if (btn) btn.addEventListener('click', function() { location.reload(); }, { once: true });
+    } catch(e) {}
+    return;
+  }
+
+  console.warn('[Boot watchdog] Waiting for three-loader to finish (no forced Boot start).');
 }, 7000);
 window.Boot = Boot;
 </script>
@@ -1881,8 +1904,12 @@ window._onThreeReady(function() {
     camera.updateProjectionMatrix();
   }
   if (window._pendingEnterGame) {
-    window._pendingEnterGame = false;
-    setTimeout(function() { if (typeof enterGame === 'function') enterGame(); }, 100);
+    setTimeout(function() {
+      if (typeof enterGame === 'function' && window._pendingEnterGame) {
+        window._pendingEnterGame = false;
+        enterGame();
+      }
+    }, 0);
   }
 });
 const RANKS = ['UNRANKED','BRONZE','SILVER','GOLD','PLATINUM','DIAMOND','MASTER','GRANDMASTER','APEX ZERO'];
@@ -5964,7 +5991,30 @@ async function signOut() {
 function continueAsGuest() {
   currentUser = null;
   Game.state.currentUser = null;
-  enterGame();
+  var st = document.getElementById('auth-status');
+  var btn = document.getElementById('guest-btn');
+  if (st) st.textContent = 'LOADING 3D ENGINE...';
+  if (btn) btn.disabled = true;
+  window._onThreeReady(function() {
+    try {
+      if (st) st.textContent = '';
+      if (btn) btn.disabled = false;
+      if (typeof enterGame === 'function') {
+        enterGame();
+        window._pendingEnterGame = false;
+      } else {
+        window._pendingEnterGame = true;
+        setTimeout(function() {
+          if (typeof enterGame === 'function' && window._pendingEnterGame) {
+            window._pendingEnterGame = false;
+            enterGame();
+          }
+        }, 0);
+      }
+    } catch(e) {
+      console.error('[onThreeReady] enterGame error:', e);
+    }
+  });
 }
 window.continueAsGuest = continueAsGuest;
 function enterGame() {
@@ -5995,6 +6045,16 @@ if (window._pendingEnterGame) {
   window._pendingEnterGame = false;
   enterGame();
 }
+window._botStats = window._botStats || { live: 0, pooled: 0 };
+window._syncBotStats = function() {
+  var pool = window._botPool || [];
+  var live = 0;
+  for (var i = 0; i < pool.length; i++) { if (pool[i] && !pool[i]._inPool) live++; }
+  window._botStats.live = live;
+  window._botStats.pooled = Math.max(0, pool.length - live);
+};
+setInterval(window._syncBotStats, 1000);
+
 window.startGameSafe = async function() {
   await window.waitForThree();
   if (!window.THREE || !THREE.Scene || !THREE.WebGLRenderer) {
@@ -9210,20 +9270,31 @@ console.log('[v15] Squad bot AI installed');
   scene.add(floor);
   const _upgradeBotMats = () => {
     const matCache = {};
+    const _getSharedMat = (m) => {
+      const key = [
+        m.color && m.color.getHexString ? m.color.getHexString() : 'noclr',
+        m.transparent ? 1 : 0,
+        m.opacity,
+        m.map ? 1 : 0,
+        m.emissive && m.emissive.getHexString ? m.emissive.getHexString() : 'noem'
+      ].join('_');
+      if (!matCache[key]) {
+        matCache[key] = new THREE.MeshLambertMaterial({
+          color: m.color.clone(),
+          transparent: m.transparent,
+          opacity: m.opacity,
+          map: m.map || null,
+          emissive: m.emissive ? m.emissive.clone() : undefined,
+        });
+      }
+      return matCache[key];
+    };
     const _upgradeGroup = (group) => {
       group.traverse(child => {
         if (!child.isMesh || !child.material) return;
         const m = child.material;
         if (m.opacity === 0 || m.transparent && m.opacity < 0.1) return;
-        const key = m.color.getHex() + '_' + (m.transparent ? 1 : 0);
-        if (!matCache[key]) {
-          matCache[key] = new THREE.MeshLambertMaterial({
-            color: m.color.clone(),
-            transparent: m.transparent,
-            opacity: m.opacity,
-          });
-        }
-        child.material = matCache[key];
+        child.material = _getSharedMat(m);
       });
     };
     _botPool.forEach(b => { if (b.mesh) _upgradeGroup(b.mesh); });
@@ -9328,19 +9399,29 @@ console.log('[v15] All v15 systems active: bot-pool · ballistics · squad-AI ·
     setTimeout(function() {
       if (typeof _initBotPool === 'function' && window._botPool) {
         const matCache = {};
+        const getSharedMat = function(m) {
+          const key = [
+            m.color && m.color.getHexString ? m.color.getHexString() : 'noclr',
+            m.transparent ? 1 : 0,
+            m.opacity,
+            m.map ? 1 : 0,
+            m.emissive && m.emissive.getHexString ? m.emissive.getHexString() : 'noem'
+          ].join('_');
+          if (!matCache[key]) {
+            matCache[key] = new THREE.MeshLambertMaterial({
+              color: m.color.clone(), transparent: m.transparent, opacity: m.opacity,
+              map: m.map || null, emissive: m.emissive ? m.emissive.clone() : undefined
+            });
+          }
+          return matCache[key];
+        };
         window._botPool.forEach(b => {
           if (!b || !b.mesh) return;
           b.mesh.traverse(child => {
             if (!child.isMesh || !child.material) return;
             const m = child.material;
             if (m.opacity === 0 || (m.transparent && m.opacity < 0.1)) return;
-            const key = m.color.getHex();
-            if (!matCache[key]) {
-              matCache[key] = new THREE.MeshLambertMaterial({
-                color: m.color.clone(), transparent: m.transparent, opacity: m.opacity
-              });
-            }
-            child.material = matCache[key];
+            child.material = getSharedMat(m);
           });
         });
       }
@@ -9512,7 +9593,7 @@ window.WEAPON_RECOIL = {
   let _gpuFrame = 0;
   function _tickGPUGrain() {
     _gpuGrainRaf = requestAnimationFrame(_tickGPUGrain);
-    if (!window.GS || !window.GS.phase) {
+    if (document.hidden || !window.GS || !window.GS.phase) {
       canvas.style.display = 'none';
       return;
     }
@@ -9521,7 +9602,7 @@ window.WEAPON_RECOIL = {
       return;
     }
     canvas.style.display = '';
-    if (_gpuFrame++ % 2 !== 0) return;
+    if (_gpuFrame++ % 3 !== 0) return;
     _resizeGPUGrain();
     gl.useProgram(prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -9574,8 +9655,9 @@ window.WEAPON_RECOIL = {
     if (performance.memory) {
       heapMB = Math.round(performance.memory.usedJSHeapSize / 1048576) + ' MB';
     }
-    const poolUsed = (window._botPool || []).filter(b => !b._inPool).length;
-    const poolFree = (window._botPool || []).filter(b => b._inPool).length;
+    const botStats = window._botStats || { live: 0, pooled: 0 };
+    const poolUsed = botStats.live;
+    const poolFree = botStats.pooled;
     const fpsC  = _col(fps,  55, 35);
     const dcC   = _col(dc,   60, 90);
     const triC  = _col(tris, 40, 80);
