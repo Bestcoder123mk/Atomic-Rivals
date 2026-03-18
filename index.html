@@ -2451,7 +2451,9 @@ const PLAYER_SKINS = [
 GS.playerSkin = 0; 
 let _recoilPitch = 0, _recoilYaw = 0;
 let _adsActive = false, _adsFOV = window._adsFOV_init || 90, _adsTargetFOV = window._adsFOV_init || 90;
-let _crosshairSpread = 0;   
+let _crosshairSpread = 0;
+let _lastShotAt = 0, _lastHitConfirmAt = 0, _lastKillConfirmAt = 0;
+const _RECOIL_RESET_MS = 200;
 function buildHumanoidModel(group, skinColors, isBot, botIdx) {
   const s = skinColors;
   const armorM  = new THREE.MeshBasicMaterial({color: s.armor  || 0x888888});
@@ -2762,10 +2764,20 @@ function updatePlayer(dt) {
       }
     }
   });
-  const forward = _pFwd; 
+  const forward = _pFwd;
   const move    = _pMove;
-  playerVel.x = move.x * speed;
-  playerVel.z = move.z * speed;
+  const targetVelX = move.x * speed;
+  const targetVelZ = move.z * speed;
+  const accel = onGround ? 12.5 : 4.2;
+  const friction = onGround ? 10.5 : 1.8;
+  if (!GS.isSliding) {
+    playerVel.x += (targetVelX - playerVel.x) * Math.min(1, dt * accel);
+    playerVel.z += (targetVelZ - playerVel.z) * Math.min(1, dt * accel);
+    if (move.lengthSq() < 0.001) {
+      playerVel.x += (0 - playerVel.x) * Math.min(1, dt * friction);
+      playerVel.z += (0 - playerVel.z) * Math.min(1, dt * friction);
+    }
+  }
   if (GS.isSliding) {
     playerVel.x = GS.slideVelX;
     playerVel.z = GS.slideVelZ;
@@ -2891,9 +2903,11 @@ function updatePlayer(dt) {
   camera.position.y += cameraBreath;
   lastPlayerPos.copy(playerObj.position);
   lastMouseDelta.set(0,0);
-  _recoilPitch *= Math.pow(0.08, dt);
-  _recoilYaw   *= Math.pow(0.08, dt);
-  _crosshairSpread = Math.max(0, _crosshairSpread - dt * (GS.isSprinting ? 1.2 : isMoving ? 1.8 : 3.5));
+  const recoilRecover = performance.now() - _lastShotAt > _RECOIL_RESET_MS ? 8.5 : 3.5;
+  _recoilPitch *= Math.pow(0.08, dt * recoilRecover);
+  _recoilYaw   *= Math.pow(0.08, dt * recoilRecover);
+  _crosshairSpread = Math.max(0, _crosshairSpread - dt * (GS.isSprinting ? 1.2 : isMoving ? 2.1 : 4.8));
+  if (performance.now() - _lastShotAt > _RECOIL_RESET_MS) GS._burstCount = 0;
   updateCrosshairSpread();
   _adsTargetFOV = _adsActive ? (GS.activeSlot===0 ? WEAPONS[GS.primaryIdx].cat==='SNIPER RIFLE' ? 24 : WEAPONS[GS.primaryIdx].cat==='LMG' ? 58 : 52 : 60) : CFG.FOV + (GS.isSprinting ? 6 : 0);
   _adsFOV += (_adsTargetFOV - _adsFOV) * Math.min(1, dt * 22);
@@ -3148,12 +3162,17 @@ function tryShoot() {
   const now = performance.now();
   const msBetweenShots = 60000 / w.rpm;
   if (!GS._lastShot) GS._lastShot = 0;
-  if (now - GS._lastShot < msBetweenShots * 0.92) return;
+  const timeSinceLastShot = now - GS._lastShot;
+  if (timeSinceLastShot < msBetweenShots * 0.92) return;
+  if (timeSinceLastShot > _RECOIL_RESET_MS) GS._burstCount = 0;
   GS._lastShot = now;
+  _lastShotAt = now;
   if (GS.activeSlot===0) GS.ammo--; else GS.ammoSec--;
   GS.totalShots++;
   updateAmmoHUD();
   const burstIdx = GS._burstCount = (GS._burstCount||0) + 1;
+  const moveSpreadScale = 1 + Math.min(1.35, Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z) / Math.max(1, CFG.WALK)) * 0.7;
+  const firstShotAccurate = burstIdx === 1 && timeSinceLastShot > _RECOIL_RESET_MS && !GS.isSprinting && moveSpreadScale < 1.18;
   const _SPRAY = {
     'ASSAULT RIFLE': [
       {p:.010,y:.004},{p:.013,y:.007},{p:.015,y:.004},{p:.014,y:-.006},{p:.016,y:.008},
@@ -3223,7 +3242,8 @@ function tryShoot() {
   }
   const useBallisticRound = (w.cat==='ASSAULT RIFLE'||w.cat==='SNIPER RIFLE'||w.cat==='LMG'||w.cat==='MARKSMAN');
   const shootDir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  const spread = w.spread * (GS.isSprinting?3:_adsActive?0.1:_crosshairSpread>0.5?2:1);
+  const baseSpread = firstShotAccurate ? 0 : w.spread;
+  const spread = baseSpread * moveSpreadScale * (GS.isSprinting ? 3 : _adsActive ? 0.55 : _crosshairSpread > 0.5 ? 2 : 1);
   shootDir.x += (Math.random()-.5)*spread;
   shootDir.y += (Math.random()-.5)*spread*0.5;
   shootDir.normalize();
@@ -3408,6 +3428,8 @@ function hitBot(bot, dmg, isHead, pos) {
   bot.hp = Math.max(0, bot.hp - dmg);
   updateBotHealthBarCanvas(bot);
   spawnFloatingDmg(pos, Math.round(dmg), isHead);
+  _lastHitConfirmAt = performance.now();
+  _slowMoTimer = Math.max(_slowMoTimer, isHead ? 0.05 : 0.035);
   if (bot.hp <= 0 && !bot.dead) {
     bot.dead = true;
     bot.deathTimer = 3.0;
@@ -3418,9 +3440,14 @@ function hitBot(bot, dmg, isHead, pos) {
     GS.totalKills++;
     GS.killsThisRound++;
     GS.scoreA++;
-    const xpGain = 100 + (isHead ? 50 : 0) + (_ksCount > 1 ? _ksCount * 20 : 0);
+    _lastKillConfirmAt = performance.now();
+    _comboCount = (_comboCount || 0) + 1;
+    _comboTimer = 4.0;
+    const comboMult = 1 + Math.min(4, (_comboCount - 1)) * 0.25;
+    const xpGain = Math.round((100 + (isHead ? 50 : 0) + (_ksCount > 1 ? _ksCount * 20 : 0)) * comboMult);
     GS.xp = (GS.xp||0) + xpGain;
-    showNotif(isHead ? `✕ HEADSHOT  +${xpGain}XP` : `✕ ELIMINATED  +${xpGain}XP`, isHead ? '#ffcc00' : '#00e5ff');
+    GS.points = (GS.points || 0) + Math.round((isHead ? 150 : 100) * comboMult);
+    showNotif(isHead ? `✕ HEADSHOT  +${xpGain}XP  ·  x${comboMult.toFixed(2)} COMBO` : `✕ ELIMINATED  +${xpGain}XP  ·  x${comboMult.toFixed(2)} COMBO`, isHead ? '#ffcc00' : '#00e5ff');
     const kfx = DOM['kill-fx'];
     if (kfx) { kfx.style.opacity='1'; setTimeout(()=>kfx.style.opacity='0',160); }
     if (typeof triggerKillConfirm === 'function') triggerKillConfirm(true);
@@ -3706,7 +3733,7 @@ function respawnBot(bot) {
 }
 let damageVignetteTimer = 0;
 let _respawnInvincible = false;
-function takeDamage(amount) {
+function takeDamage(amount, attackerPos) {
   if (GS.phase !== 'active' || _respawnInvincible) return;
   const prevHp = GS.hp;
   GS.hp = Math.max(0, GS.hp - amount);
@@ -3725,6 +3752,7 @@ function takeDamage(amount) {
     if (amount >= 30) { hpEl.style.color='#ff1a3c'; setTimeout(()=>{ if(hpEl) hpEl.style.color=''; },300); }
   }
   doScreenShake(Math.min(0.04, amount * 0.0015), 0.18);
+  _slowMoTimer = Math.max(_slowMoTimer, amount >= 24 ? 0.04 : 0.025);
   if (GS.hp <= 0 && prevHp > 0) {
     GS.phase = 'dead';
     GS.totalDeaths++;
@@ -6566,10 +6594,12 @@ function launchGame() {
 }
 var _directLaunch = function() { if(typeof _origStartGame==='function') _origStartGame(); else startGame(); };
 function updateCrosshairSpread() {
-  if (!DOM.cl_top) return; 
+  if (!DOM.cl_top) return;
   const lines = DOM.cl_all;
   if (!lines || !lines.length) return;
-  const gap = 9 + _crosshairSpread * 22;
+  const now = performance.now();
+  const stableBonus = now - _lastShotAt > _RECOIL_RESET_MS ? -2 : 0;
+  const gap = Math.max(6, 9 + _crosshairSpread * 22 + stableBonus);
   const top = DOM.cl_top;
   const bot2 = DOM.cl_bot;
   const lft = DOM.cl_lft;
@@ -6578,7 +6608,9 @@ function updateCrosshairSpread() {
   if (bot2) bot2.style.top = `${gap}px`;
   if (lft) lft.style.left = `-${gap+10}px`;
   if (rgt) rgt.style.left = `${gap}px`;
-  const color = _crosshairSpread > 0.6 ? 'rgba(255,80,80,0.95)' : 'rgba(255,255,255,0.92)';
+  const hitFlash = now - _lastHitConfirmAt < 90;
+  const killFlash = now - _lastKillConfirmAt < 180;
+  const color = killFlash ? '#ffcc00' : hitFlash ? '#ff4d6d' : _crosshairSpread > 0.6 ? 'rgba(255,80,80,0.95)' : 'rgba(255,255,255,0.92)';
   lines.forEach(l => { if (!l.classList.contains('dot')) l.style.background = color; });
 }
 function startADS() {
@@ -6726,6 +6758,7 @@ stopADS = function() {
 if (!window.DISABLE_PARTICLES) _initAdsCanvas();
 console.log('[APEX ZERO] All systems online ✓');
 let _ksCount = 0, _ksTimer = 0;
+let _comboCount = 0, _comboTimer = 0;
 const _ksLabels = {
   2: { text: 'DOUBLE KILL',  color: '#00e5ff' },
   3: { text: 'TRIPLE KILL',  color: '#ffcc00' },
@@ -6761,6 +6794,10 @@ function checkKillStreak() {
     if (_ksTimer > 0) {
       _ksTimer -= dt;
       if (_ksTimer <= 0) { _ksCount = 0; _ksTimer = 0; }
+    }
+    if (_comboTimer > 0) {
+      _comboTimer -= dt;
+      if (_comboTimer <= 0) { _comboCount = 0; _comboTimer = 0; }
     }
   };
 })();
@@ -10079,23 +10116,26 @@ updateBots = function(dt) {
     }
     function shoot() {
       if (bot.attackTimer > 0) return;
-      bot.mesh.rotation.y = angleToPlayer;
       const tier = Math.min(3, Math.floor(_botDifficulty * 3.99));
-      const acc  = [0.70, 0.80, 0.90, 0.97][tier];
-      const lead = [0.05, 0.12, 0.22, 0.38][tier];
-      const spread = (0.09 + (distToPlayer/CFG.BOT_ATTACK_RANGE)*0.18) * (1 - Math.min(1,_botDifficulty)*0.65);
+      const reactionDelay = 100 + Math.random() * 200;
+      bot._aimYaw = bot._aimYaw === undefined ? bot.mesh.rotation.y : bot._aimYaw;
+      bot._aimYaw += (angleToPlayer - bot._aimYaw) * 0.08;
+      bot.mesh.rotation.y = bot._aimYaw;
+      const acc  = [0.62, 0.74, 0.84, 0.92][tier];
+      const lead = [0.04, 0.10, 0.18, 0.30][tier];
+      const spread = (0.11 + (distToPlayer/CFG.BOT_ATTACK_RANGE)*0.18) * (1 - Math.min(1,_botDifficulty)*0.45);
       const predX = playerPos.x + playerVel.x * lead;
       const predZ = playerPos.z + playerVel.z * lead;
       const sx = (Math.random()-.5)*spread, sz = (Math.random()-.5)*spread;
       const hitX = botPos.x + ((playerPos.x-botPos.x) + sx*distToPlayer);
       const hitZ = botPos.z + ((playerPos.z-botPos.z) + sz*distToPlayer);
-      const didHit = Math.random() < acc && Math.abs(hitX-predX) < 0.48 && Math.abs(hitZ-predZ) < 0.48;
+      const didHit = Math.random() < acc && Math.abs(hitX-predX) < 0.52 && Math.abs(hitZ-predZ) < 0.52;
       if (didHit) {
-        const delay = [80,60,40,22][tier] + Math.random()*40;
+        const delay = reactionDelay + [30,15,0,-8][tier] + Math.random()*35;
         setTimeout(() => {
           if (GS.phase === 'active' && !_respawnInvincible) {
-            const isHead = Math.random() < [0.06,0.10,0.15,0.22][tier];
-            takeDamage((CFG.BOT_DAMAGE + Math.floor(Math.random()*8)) * (isHead ? 1.85 : 1));
+            const isHead = Math.random() < [0.05,0.08,0.12,0.16][tier];
+            takeDamage((CFG.BOT_DAMAGE + Math.floor(Math.random()*8)) * (isHead ? 1.85 : 1), botPos.clone());
           }
         }, delay);
       }
@@ -10152,12 +10192,13 @@ updateBots = function(dt) {
         bot._zigzagPhase = (bot._zigzagPhase || 0) + dt * 2.8;
         moveTo(angleToPlayer + Math.sin(bot._zigzagPhase) * 0.4, 4.0);
         if (distToPlayer < CFG.BOT_ATTACK_RANGE * 0.9) {
-          bot.state = hasLOS ? 'engage' : 'cover';
+          bot.state = hasLOS ? 'attack' : 'cover';
           bot.stateTimer = 0;
         }
         if (distToPlayer > CFG.BOT_DETECT_RANGE * 1.8) bot.state = 'patrol';
         break;
       }
+      case 'attack':
       case 'engage': {
         bot.mesh.rotation.y = angleToPlayer;
         if (!hasLOS) { bot.state = 'cover'; bot.stateTimer = 0; break; }
